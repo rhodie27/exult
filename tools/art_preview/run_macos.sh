@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the art preview on macOS from Exult screenshots.
-# Usage: tools/art_preview/run_macos.sh OUT_DIR SCREENSHOT...
+# Usage: tools/art_preview/run_macos.sh OUT_DIR [STATIC_DIR | SCREENSHOT...]
+# With no inputs, scenes are rendered from the Black Gate files Exult uses.
 set -euo pipefail
 eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -22,5 +23,15 @@ if [ ! -x "$CACHE/esrgan/realesrgan-ncnn-vulkan" ]; then
 fi
 
 python3 -m venv "$CACHE/venv" && "$CACHE/venv/bin/pip" -q install pillow
+
+OUT="$1"
+shift
+if [ $# -eq 0 ]; then
+  set -- "/Library/Application Support/Exult/blackgate/STATIC"
+fi
+if [ $# -eq 1 ] && [ -d "$1" ]; then
+  "$CACHE/venv/bin/python" "$HERE/render_scenes.py" "$1" "$OUT/shots"
+  set -- "$OUT"/shots/*.png
+fi
 UPSCALE_PREVIEW="$CACHE/upscale_preview" ESRGAN="$CACHE/esrgan/realesrgan-ncnn-vulkan" \
-  "$CACHE/venv/bin/python" "$HERE/make_preview.py" "$@"
+  "$CACHE/venv/bin/python" "$HERE/make_preview.py" "$OUT" "$@"

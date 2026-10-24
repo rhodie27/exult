@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upscale Exult screenshots several ways for a side-by-side art preview.
+"""Upscale game images several ways for a side-by-side art preview.
 
 Usage: make_preview.py OUT_DIR SCREENSHOT [SCREENSHOT ...]
 
@@ -67,6 +67,8 @@ def main():
                                              os.path.join(out_dir, f"{name}-{key}.webp"))
         index.append(entry)
         print(f"done {name}")
+    if not index:
+        sys.exit("No usable images: inputs must be 8-bit paletted (native game resolution).")
     with open(os.path.join(out_dir, "index.json"), "w") as f:
         json.dump(index, f, indent=1)
     with open(os.path.join(out_dir, "index.html"), "w") as f:
