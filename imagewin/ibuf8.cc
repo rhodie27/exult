@@ -29,6 +29,8 @@
 #include "endianio.h"
 #include "ignore_unused_variable_warning.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -45,6 +47,12 @@ void Image_buffer8::copy(
 		int srcw, int srch,     // Dimensions to copy.
 		int destx, int desty    // Where to copy to.
 ) {
+	srcx *= res;
+	srcy *= res;
+	srcw *= res;
+	srch *= res;
+	destx *= res;
+	desty *= res;
 	int ynext;
 	int yfrom;
 	int yto;                // Figure y stuff.
@@ -84,7 +92,22 @@ void Image_buffer8::get(
 	if (!clip(destx, desty, srcw, srch, srcx, srcy)) {
 		return;
 	}
-	unsigned char* to   = dest->bits + desty * dest->line_width + destx;
+	if (res != dest->res) {    // Resample a game pixel at a time.
+		auto* dest8 = static_cast<Image_buffer8*>(dest);
+		for (int y = 0; y < srch; y++) {
+			for (int x = 0; x < srcw; x++) {
+				const unsigned char pix = *pixel_ptr(srcx + x, srcy + y);
+				unsigned char*      to  = dest8->pixel_ptr(destx + x, desty + y);
+				dest8->fill_block(to, pix, 1);
+			}
+		}
+		return;
+	}
+	srcw *= res;
+	srch *= res;
+	unsigned char* to   = dest->bits + desty * res * dest->line_width + destx * res;
+	srcx *= res;
+	srcy *= res;
 	unsigned char* from = bits + srcy * line_width + srcx;
 	// Figure # pixels to next line.
 	const int to_next   = dest->line_width - srcw;
@@ -106,13 +129,60 @@ void Image_buffer8::put(
 		Image_buffer* src,      // Copy from here.
 		int destx, int desty    // Copy to here.
 ) {
-	Image_buffer8::copy8(src->bits, src->get_width(), src->get_height(), destx, desty);
+	if (src->res == 1) {
+		Image_buffer8::copy8(src->bits, src->get_width(), src->get_height(), destx, desty);
+		return;
+	}
+	int srcx = 0;
+	int srcy = 0;
+	int srcw = src->get_width();
+	int srch = src->get_height();
+	if (!clip(srcx, srcy, srcw, srch, destx, desty)) {
+		return;
+	}
+	auto* src8 = static_cast<Image_buffer8*>(src);
+	if (src->res == res) {    // Straight copy of physical pixels.
+		const unsigned char* from = src8->pixel_ptr(srcx, srcy);
+		unsigned char*       to   = pixel_ptr(destx, desty);
+		for (int y = 0; y < srch * res; y++, from += src->line_width, to += line_width) {
+			std::memcpy(to, from, srcw * res);
+		}
+		return;
+	}
+	for (int y = 0; y < srch; y++) {    // Resample a game pixel at a time.
+		for (int x = 0; x < srcw; x++) {
+			fill_block(pixel_ptr(destx + x, desty + y), *src8->pixel_ptr(srcx + x, srcy + y), 1);
+		}
+	}
+}
+
+/*
+ *  Write game pixels expanded to res x res blocks.
+ */
+
+void Image_buffer8::copy_blocks(unsigned char* to, const unsigned char* from, int n) {
+	for (int r = 0; r < res; r++, to += line_width) {
+		unsigned char* row = to;
+		for (int i = 0; i < n; i++) {
+			std::memset(row, from[i], res);
+			row += res;
+		}
+	}
 }
 
 /*
  * Fill buffer with random static
  */
 void Image_buffer8::fill_static(int black, int gray, int white) {
+	if (res != 1) {
+		for (int y = -offset_y; y < height - offset_y; ++y) {
+			for (int x = -offset_x; x < width - offset_x; ++x) {
+				const int r = std::rand() % 5;
+				fill_block(pixel_ptr(x, y), r < 2 ? black : r < 4 ? gray : white, 1);
+			}
+		}
+		return;
+	}
 	for (int y = 0; y < height; ++y) {
 		unsigned char* p = bits + (y - offset_y) * line_width - offset_x;
 		for (int x = 0; x < width; ++x) {
@@ -138,8 +208,8 @@ void Image_buffer8::fill_static(int black, int gray, int white) {
  */
 
 void Image_buffer8::fill8(unsigned char pix) {
-	unsigned char* pixels = bits - offset_y * line_width - offset_x;
-	const int      cnt    = line_width * height;
+	unsigned char* pixels = pixel_ptr(-offset_x, -offset_y);
+	const int      cnt    = line_width * height * res;
 	for (int i = 0; i < cnt; i++) {
 		Write1(pixels, pix);
 	}
@@ -156,8 +226,10 @@ void Image_buffer8::fill8(unsigned char pix, int srcw, int srch, int destx, int 
 	if (!clip(srcx, srcy, srcw, srch, destx, desty)) {
 		return;
 	}
-	unsigned char* pixels  = bits + desty * line_width + destx;
-	const int      to_next = line_width - srcw;    // # pixels to next line.
+	unsigned char* pixels = pixel_ptr(destx, desty);
+	srcw *= res;
+	srch *= res;
+	const int to_next = line_width - srcw;    // # pixels to next line.
 	while (srch--) {                               // Do each line.
 		for (int cnt = srcw; cnt; cnt--) {
 			Write1(pixels, pix);
@@ -174,6 +246,10 @@ void Image_buffer8::fill_hline8(unsigned char pix, int srcw, int destx, int dest
 	int srcx = 0;
 	// Constrain to window's space.
 	if (!clip_x(srcx, srcw, destx, desty)) {
+		return;
+	}
+	if (res != 1) {
+		fill_block(pixel_ptr(destx, desty), pix, srcw);
 		return;
 	}
 	unsigned char* pixels = bits + desty * line_width + destx;
@@ -285,6 +361,25 @@ void Image_buffer8::draw_line8(unsigned char val, int startx, int starty, int en
 		return;
 	}
 
+	if (res != 1) {
+		// Step along the longer axis in game pixels, painting whole blocks.
+		const int steps = std::max(std::abs(endx - startx), std::abs(endy - starty));
+		for (int i = 0; i <= steps; i++) {
+			const int      x  = steps ? startx + static_cast<int>(std::lround(double(endx - startx) * i / steps)) : startx;
+			const int      y  = steps ? starty + static_cast<int>(std::lround(double(endy - starty) * i / steps)) : starty;
+			unsigned char* to = pixel_ptr(x, y);
+			if (xform == nullptr) {
+				fill_block(to, val, 1);
+			} else {
+				for (int r = 0; r < res; r++) {
+					for (int k = 0; k < res; k++) {
+						to[r * line_width + k] = (*xform)[to[r * line_width + k]];
+					}
+				}
+			}
+		}
+		return;
+	}
 	int end0   = endx;
 	int start0 = startx;
 	int inc0   = 1;
@@ -376,6 +471,12 @@ void Image_buffer8::copy8(
 
 	uint8*       to   = bits + desty * line_width + destx;
 	const uint8* from = src_pixels + srcy * src_width + srcx;
+	if (res != 1) {
+		for (int y = 0; y < srch; y++, from += src_width) {
+			copy_blocks(pixel_ptr(destx, desty + y), from, srcw);
+		}
+		return;
+	}
 	while (srch--) {
 		std::memcpy(to, from, srcw);
 		from += src_width;
@@ -394,6 +495,10 @@ void Image_buffer8::copy_hline8(
 	int srcx = 0;
 	// Constrain to window's space.
 	if (!clip_x(srcx, srcw, destx, desty)) {
+		return;
+	}
+	if (res != 1) {
+		copy_blocks(pixel_ptr(destx, desty), src_pixels + srcx, srcw);
 		return;
 	}
 	unsigned char*       to   = bits + desty * line_width + destx;
@@ -418,6 +523,24 @@ void Image_buffer8::copy_hline_translucent8(
 	int srcx = 0;
 	// Constrain to window's space.
 	if (!clip_x(srcx, srcw, destx, desty)) {
+		return;
+	}
+	if (res != 1) {
+		const unsigned char* from = src_pixels + srcx;
+		for (int i = 0; i < srcw; i++) {
+			const unsigned char c  = from[i];
+			unsigned char*      to = pixel_ptr(destx + i, desty);
+			if (c >= first_translucent && c <= last_translucent) {
+				const Xform_palette& xf = xforms[c - first_translucent];
+				for (int r = 0; r < res; r++) {
+					for (int k = 0; k < res; k++) {
+						to[r * line_width + k] = xf[to[r * line_width + k]];
+					}
+				}
+			} else {
+				fill_block(to, c, 1);
+			}
+		}
 		return;
 	}
 	unsigned char*       to   = bits + desty * line_width + destx;
@@ -448,6 +571,15 @@ void Image_buffer8::fill_hline_translucent8(
 	if (!clip_x(srcx, srcw, destx, desty)) {
 		return;
 	}
+	if (res != 1) {
+		unsigned char* row = pixel_ptr(destx, desty);
+		for (int r = 0; r < res; r++, row += line_width) {
+			for (int i = 0; i < srcw * res; i++) {
+				row[i] = xform[row[i]];
+			}
+		}
+		return;
+	}
 	unsigned char* pixels = bits + desty * line_width + destx;
 	while (srcw--) {
 		*pixels = xform[*pixels];
@@ -470,8 +602,10 @@ void Image_buffer8::fill_translucent8(
 	if (!clip(srcx, srcy, srcw, srch, destx, desty)) {
 		return;
 	}
-	unsigned char* pixels  = bits + desty * line_width + destx;
-	const int      to_next = line_width - srcw;    // # pixels to next line.
+	unsigned char* pixels = pixel_ptr(destx, desty);
+	srcw *= res;
+	srch *= res;
+	const int to_next = line_width - srcw;    // # pixels to next line.
 	while (srch--) {                               // Do each line.
 		for (int cnt = srcw; cnt; cnt--, pixels++) {
 			*pixels = xform[*pixels];
@@ -496,6 +630,17 @@ void Image_buffer8::copy_transparent8(
 	if (!clip(srcx, srcy, srcw, srch, destx, desty)) {
 		return;
 	}
+	if (res != 1) {
+		for (int y = 0; y < srch; y++) {
+			const unsigned char* from = src_pixels + (srcy + y) * src_width + srcx;
+			for (int x = 0; x < srcw; x++) {
+				if (from[x]) {
+					fill_block(pixel_ptr(destx + x, desty + y), from[x], 1);
+				}
+			}
+		}
+		return;
+	}
 	unsigned char*       to        = bits + desty * line_width + destx;
 	const unsigned char* from      = src_pixels + srcy * src_width + srcx;
 	const int            to_next   = line_width - srcw;    // # pixels to next line.
@@ -514,6 +659,10 @@ void Image_buffer8::copy_transparent8(
 
 // Slightly Optimized RLE Painter
 void Image_buffer8::paint_rle(int xoff, int yoff, const unsigned char* inptr) {
+	if (res != 1) {
+		paint_rle_scaled(xoff, yoff, inptr, nullptr);
+		return;
+	}
 	const uint8* in = inptr;
 	int          scanlen;
 	const int    right  = clipx + clipw;
@@ -670,6 +819,10 @@ void Image_buffer8::paint_rle(int xoff, int yoff, const unsigned char* inptr) {
 
 // Slightly Optimized RLE Painter
 void Image_buffer8::paint_rle_remapped(int xoff, int yoff, const unsigned char* inptr, const unsigned char*& trans) {
+	if (res != 1) {
+		paint_rle_scaled(xoff, yoff, inptr, trans);
+		return;
+	}
 	const uint8* in = inptr;
 	int          scanlen;
 	const int    right  = clipx + clipw;
@@ -819,6 +972,75 @@ void Image_buffer8::paint_rle_remapped(int xoff, int yoff, const unsigned char* 
 				} else {
 					++in;
 				}
+			}
+		}
+	}
+}
+
+/*
+ *  RLE painter for res > 1: each game pixel becomes a res x res block.
+ */
+
+void Image_buffer8::paint_rle_scaled(int xoff, int yoff, const unsigned char* in, const unsigned char* trans) {
+	int scanlen;
+	while ((scanlen = little_endian::Read2(in)) != 0) {
+		const int encoded = scanlen & 1;
+		scanlen           = scanlen >> 1;
+		const int scanx   = xoff + static_cast<sint16>(little_endian::Read2(in));
+		const int scany   = yoff + static_cast<sint16>(little_endian::Read2(in));
+		const bool row_visible = scany >= clipy && scany < clipy + cliph;
+		auto       put         = [&](int x, unsigned char pix) {
+            if (row_visible && x >= clipx && x < clipx + clipw) {
+                fill_block(pixel_ptr(x, scany), trans ? trans[pix] : pix, 1);
+            }
+		};
+		if (!encoded) {
+			for (int i = 0; i < scanlen; i++) {
+				put(scanx + i, in[i]);
+			}
+			in += scanlen;
+			continue;
+		}
+		for (int b = 0; b < scanlen;) {
+			int       bcnt   = Read1(in);
+			const int repeat = bcnt & 1;
+			bcnt >>= 1;
+			if (repeat) {
+				const unsigned char pix = Read1(in);
+				for (int i = 0; i < bcnt; i++) {
+					put(scanx + b + i, pix);
+				}
+			} else {
+				for (int i = 0; i < bcnt; i++) {
+					put(scanx + b + i, in[i]);
+				}
+				in += bcnt;
+			}
+			b += bcnt;
+		}
+	}
+}
+
+/*
+ *  Paint art that is already at this buffer's resolution.
+ */
+
+void Image_buffer8::paint_hires(
+		int xoff, int yoff, const unsigned char* pixels, int w, int h, int xleft, int yabove, unsigned char transparent,
+		const unsigned char* trans) {
+	const int x0     = xoff * res - xleft;    // Physical top-left.
+	const int y0     = yoff * res - yabove;
+	const int left   = std::max(x0, clipx * res);
+	const int right  = std::min(x0 + w, (clipx + clipw) * res);
+	const int top    = std::max(y0, clipy * res);
+	const int bottom = std::min(y0 + h, (clipy + cliph) * res);
+	for (int y = top; y < bottom; y++) {
+		const unsigned char* from = pixels + (y - y0) * w;
+		unsigned char*       to   = bits + y * line_width;
+		for (int x = left; x < right; x++) {
+			const unsigned char pix = from[x - x0];
+			if (pix != transparent) {
+				to[x] = trans ? trans[pix] : pix;
 			}
 		}
 	}

@@ -62,6 +62,11 @@ protected:
 	int            pixel_size;    // # bytes/pixel.
 	unsigned char* bits;          // Allocated image buffer.
 	int            line_width;    // # words/scan-line.
+	// Physical pixels per game pixel along each axis. Coordinates, sizes and
+	// the clip rect are always in game pixels; only bits/line_width are
+	// physical, so a buffer with res > 1 stores each game pixel as a
+	// res x res block and can also hold high-resolution art.
+	int res = 1;
 private:
 	int clipx, clipy, clipw, cliph;    // Clip rectangle.
 
@@ -160,6 +165,10 @@ public:
 
 	unsigned int get_line_width() {
 		return line_width;
+	}
+
+	int get_res() const {
+		return res;
 	}
 
 	void clear_clip() {    // Reset clip to whole window.

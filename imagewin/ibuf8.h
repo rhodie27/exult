@@ -24,6 +24,8 @@
 
 #include "imagebuf.h"
 
+#include <cstring>
+
 /*
  *  An 8-bit image buffer:
  */
@@ -34,8 +36,10 @@ class Image_buffer8 : public Image_buffer {
 	Image_buffer8(unsigned int w, unsigned int h, Image_buffer*) : Image_buffer(w, h, 8), bits_owned(false) {}
 
 public:
-	Image_buffer8(unsigned int w, unsigned int h) : Image_buffer(w, h, 8), bits_owned(true) {
-		bits = new unsigned char[w * h];
+	Image_buffer8(unsigned int w, unsigned int h, int r = 1) : Image_buffer(w, h, 8), bits_owned(true) {
+		res        = r;
+		line_width = w * r;
+		bits       = new unsigned char[w * r * h * r];
 	}
 	friend class Image_window8;
 
@@ -56,7 +60,7 @@ public:
 	 *  Depth-independent methods:
 	 */
 	std::unique_ptr<Image_buffer> create_another(int w, int h) override {
-		return std::make_unique<Image_buffer8>(w, h);
+		return std::make_unique<Image_buffer8>(w, h, res);
 	}
 
 	// Copy within itself.
@@ -97,21 +101,53 @@ public:
 
 	// Get/put a single pixel.
 	unsigned char get_pixel8(int x, int y) override {
-		return bits[y * line_width + x];
+		return *pixel_ptr(x, y);
 	}
 
 	void put_pixel8(unsigned char pix, int x, int y) override {
 		if (x >= clipx && x < clipx + clipw && y >= clipy && y < clipy + cliph) {
-			bits[y * line_width + x] = pix;
+			if (res == 1) {
+				bits[y * line_width + x] = pix;
+			} else {
+				fill_block(pixel_ptr(x, y), pix, 1);
+			}
 		}
 	}
 
 	void paint_rle(int xoff, int yoff, const unsigned char* in);
 	void paint_rle_remapped(int xoff, int yoff, const unsigned char* inptr, const unsigned char*& trans);
 
+	// Paint high-resolution art: pixels is a (w x h) image at this buffer's
+	// res, transparent where it equals 'transparent', with its origin at
+	// (xleft, yabove) in physical pixels. xoff/yoff are game coordinates.
+	void paint_hires(
+			int xoff, int yoff, const unsigned char* pixels, int w, int h, int xleft, int yabove, unsigned char transparent,
+			const unsigned char* trans = nullptr);
+
 	void draw_beveled_box(
 			int x, int y, int w, int h, int depth, uint8 colfill, uint8 coltop, uint8 coltr, uint8 colbottom, uint8 colbl,
 			std::optional<uint8> coltlbr = {}) override;
+
+private:
+	// First physical pixel of game pixel (x, y).
+	unsigned char* pixel_ptr(int x, int y) {
+		return bits + y * res * line_width + x * res;
+	}
+
+	// Set an n game pixel wide run starting at 'to' (one res x res block per
+	// game pixel) to a single value.
+	void fill_block(unsigned char* to, unsigned char pix, int n) {
+		for (int r = 0; r < res; r++, to += line_width) {
+			std::memset(to, pix, n * res);
+		}
+	}
+
+	// Write n game pixels from 'from', each expanded to a res x res block.
+	void copy_blocks(unsigned char* to, const unsigned char* from, int n);
+
+	// Shared body of paint_rle/paint_rle_remapped for res > 1.
+	void paint_rle_scaled(int xoff, int yoff, const unsigned char* in, const unsigned char* trans);
+
 };
 
 #endif
