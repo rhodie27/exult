@@ -476,6 +476,26 @@ void Shape_frame::get_rle_shape(
 	rle = true;
 }
 
+unique_ptr<Hires_frame> Hires_frame::reflect() const {
+	auto reflected    = make_unique<Hires_frame>();
+	reflected->res    = res;
+	reflected->width  = height;
+	reflected->height = width;
+	reflected->xleft  = yabove;
+	reflected->yabove = xleft;
+	reflected->pixels = make_unique<unsigned char[]>(width * height);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			reflected->pixels[x * height + y] = pixels[y * width + x];
+		}
+	}
+	return reflected;
+}
+
+const Hires_frame* Shape_frame::hires_for(const Image_buffer8* win) const {
+	return hires && hires->res == win->get_res() ? hires.get() : nullptr;
+}
+
 /*
  *  Show a Run-Length_Encoded shape.
  */
@@ -494,6 +514,10 @@ void Shape_frame::paint_rle(
 		}
 	}
 
+	if (const Hires_frame* hr = hires_for(win)) {
+		win->paint_hires(xoff, yoff, hr->pixels.get(), hr->width, hr->height, hr->xleft, hr->yabove, Hires_frame::transparent);
+		return;
+	}
 	win->paint_rle(xoff, yoff, data.get());
 }
 
@@ -515,6 +539,11 @@ void Shape_frame::paint_rle_remapped(
 		}
 	}
 
+	if (const Hires_frame* hr = hires_for(win)) {
+		win->paint_hires(
+				xoff, yoff, hr->pixels.get(), hr->width, hr->height, hr->xleft, hr->yabove, Hires_frame::transparent, trans);
+		return;
+	}
 	win->paint_rle_remapped(xoff, yoff, data.get(), trans);
 }
 
@@ -528,6 +557,8 @@ void Shape_frame::paint(
 ) {
 	if (rle) {
 		paint_rle(win, xoff, yoff);
+	} else if (const Hires_frame* hr = hires_for(win)) {
+		win->paint_hires(xoff - c_tilesize, yoff - c_tilesize, hr->pixels.get(), hr->width, hr->height, 0, 0, -1);
 	} else {
 		win->copy8(data.get(), c_tilesize, c_tilesize, xoff - c_tilesize, yoff - c_tilesize);
 	}
@@ -553,8 +584,14 @@ void Shape_frame::paint_rle_translucent(
 		}
 	}
 	// First pix. value to transform.
-	const int    xfstart = 0xff - xfcnt;
-	const uint8* in      = data.get();
+	const int xfstart = 0xff - xfcnt;
+	if (const Hires_frame* hr = hires_for(win)) {
+		win->paint_hires(
+				xoff, yoff, hr->pixels.get(), hr->width, hr->height, hr->xleft, hr->yabove, Hires_frame::transparent, nullptr,
+				xforms, xfstart);
+		return;
+	}
+	const uint8* in = data.get();
 	int          scanlen;
 	while ((scanlen = little_endian::Read2(in)) != 0) {
 		// Get length of scan line.

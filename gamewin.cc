@@ -322,6 +322,10 @@ Game_window::Game_window(
 	clock       = new Game_clock(tqueue);
 	shape_man   = new Shape_manager();    // Create the single instance.
 	maps.push_back(map);                  // Map #0.
+	// Detail for hi-res art (1 = off): physical pixels per game pixel.
+	int hires_art;
+	config->value("config/video/hires_art", hires_art, 1);
+	Image_window::requested_res = std::max(1, hires_art);
 	// Create window.
 	win = new Image_window8(width, height, gwidth, gheight, scale, fullscreen, scaler, fillmode, fillsclr);
 	win->set_title("Exult Ultima VII Engine");

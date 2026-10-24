@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "shapeid.h"
 
-class Image_buffer8;
+#include "ibuf8.h"
 
 /*
  *  The flat landscape, 16x16 tiles:
@@ -92,12 +92,14 @@ public:
 	//   edited.
 	void abort_edits();    // Undo changes.
 
+	static int current_res();    // Res of the game window's buffer.
+
 	Image_buffer8* get_rendered_flats() {
 		if (render_queue != this) {    // Not already first in queue?
 			// Move to front of queue.
 			insert_in_queue();
 		}
-		return rendered_flats ? rendered_flats : render_flats();
+		return rendered_flats && rendered_flats->get_res() == current_res() ? rendered_flats : render_flats();
 	}
 
 	void render_all(int cx, int cy, int pass);    // Render terrain-editing mode.

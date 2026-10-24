@@ -320,6 +320,10 @@ public:
 protected:
 	Image_buffer* ibuf;            // Where the data is actually stored.
 	int           scale;           // Only 1 or 2 for now.
+	// Detail of the game buffer: physical pixels per game pixel, so hi-res
+	// art can be drawn.  Always divides scale; the scalers then only scale
+	// by scale / res.  See Image_buffer::res.
+	int res = 1;
 	int           scaler;          // What scaler do we want to use
 	bool          uses_palette;    // Does this window have a palette
 	bool          fullscreen;      // Rendering fullscreen.
@@ -579,6 +583,13 @@ public:
 
 	virtual ~Image_window();
 
+	// Detail asked for by the hires_art setting, used by create_surface.
+	static int requested_res;
+
+	int get_res() const {
+		return res;
+	}
+
 	// int get_scale()           // Returns 1 or 2.
 	//{ return scale; }
 	int get_scale_factor() {
@@ -803,6 +814,10 @@ public:
 		// A full-screen scene layer buffer has no guard band, so use the plain
 		// (point-scaler style) path with no guard band expansion.
 		if (scene_mode) {
+			return false;
+		}
+		// Hi-res buffers are always point scaled.
+		if (res > 1) {
 			return false;
 		}
 		// Only if actually scaling

@@ -32,6 +32,9 @@
 #include "exceptions.h"
 #include "fnames.h"
 #include "fontvga.h"
+#include "ibuf8.h"
+#include "iwin8.h"
+#include "pngio.h"
 #include "game.h"
 #include "gamewin.h"
 #include "istring.h"
@@ -40,6 +43,8 @@
 #include "utils.h"
 #include "vgafile.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <utility>
@@ -549,6 +554,64 @@ std::shared_ptr<Font> Shape_manager::get_font(int fontnum) {
 	return fonts->get_font(fontnum);
 }
 
+/*
+ *  Load high-resolution replacement art for a shapes.vga frame, if the
+ *  patch directory has it.  Files are <PATCH>/hires/shapes/SSSS_FF.png:
+ *  8-bit images in the game palette with index 255 transparent, exactly
+ *  res times the frame's size.  Reflected frames reuse the art of the
+ *  frame they reflect.
+ */
+static void load_hires_frame(Shape_frame* frame, int shapenum, int framenum, int res) {
+#ifdef HAVE_PNG_H
+	if (res <= 1 || frame == nullptr || frame->get_hires() != nullptr) {
+		return;
+	}
+	const bool reflected = (framenum & 32) != 0;
+	char       name[64];
+	snprintf(name, sizeof(name), "<PATCH>/hires/shapes/%04d_%02d.png", shapenum, framenum & 31);
+	if (!U7exists(name)) {
+		return;
+	}
+	const std::string path = get_system_path(name);
+	int               width;
+	int               height;
+	int               rowbytes;
+	int               xoff;
+	int               yoff;
+	int               pal_size;
+	unsigned char*    pixels;
+	unsigned char*    palette;
+	if (!Import_png8(path.c_str(), -1, width, height, rowbytes, xoff, yoff, pixels, palette, pal_size)) {
+		std::cerr << "Couldn't read hi-res art " << path << std::endl;
+		return;
+	}
+	delete[] palette;
+	std::unique_ptr<unsigned char[]> owned(pixels);
+	// Pixel values are used as is, so index 255 must be the transparent one.
+	// Size it should be: the unreflected frame's, times res.
+	const int want_w = (reflected ? frame->get_height() : frame->get_width()) * res;
+	const int want_h = (reflected ? frame->get_width() : frame->get_height()) * res;
+	if (width != want_w || height != want_h) {
+		std::cerr << "Hi-res art " << path << " is " << width << "x" << height << ", expected " << want_w << "x" << want_h
+				  << std::endl;
+		return;
+	}
+	auto hires    = std::make_unique<Hires_frame>();
+	hires->res    = res;
+	hires->width  = width;
+	hires->height = height;
+	hires->xleft  = (reflected ? frame->get_yabove() : frame->get_xleft()) * res;
+	hires->yabove = (reflected ? frame->get_xleft() : frame->get_yabove()) * res;
+	hires->pixels = std::make_unique<unsigned char[]>(width * height);
+	for (int y = 0; y < height; y++) {
+		std::memcpy(&hires->pixels[y * width], pixels + y * rowbytes, width);
+	}
+	frame->set_hires(reflected ? hires->reflect() : std::move(hires));
+#else
+	ignore_unused_variable_warning(frame, shapenum, framenum, res);
+#endif
+}
+
 Shape_manager::Cached_shape Shape_manager::cache_shape(int shape_kind, int shapenum, int framenum) {
 	Cached_shape cache{nullptr, false};
 	if (shapenum < 0 || framenum == -1) {
@@ -562,6 +625,7 @@ Shape_manager::Cached_shape Shape_manager::cache_shape(int shape_kind, int shape
 	if (shape_kind == SF_SHAPES_VGA) {
 		cache.shape     = sman->shapes.get_shape(shapenum, framenum);
 		cache.has_trans = sman->shapes.get_info(shapenum).has_translucency();
+		load_hires_frame(cache.shape, shapenum, framenum, Game_window::get_instance()->get_win()->get_ib8()->get_res());
 	} else if (shape_kind < SF_OTHER) {
 		cache.shape = sman->files[shape_kind].get_shape(shapenum, framenum);
 		if (shape_kind == SF_SPRITES_VGA) {

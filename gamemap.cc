@@ -1704,8 +1704,9 @@ bool Game_map::write_minimap() {
 	for (auto* ter : *chunk_terrains) {
 		Image_buffer8* ibuf    = ter->get_rendered_flats();
 		unsigned char* terbits = ibuf->get_bits();
-		const int      w       = ibuf->get_width();
-		const int      h       = ibuf->get_height();
+		// All the physical pixels, which are contiguous.
+		const int w = ibuf->get_width() * ibuf->get_res();
+		const int h = ibuf->get_height() * ibuf->get_res();
 		unsigned long  r       = 0;
 		unsigned long  g       = 0;
 		unsigned long  b       = 0;

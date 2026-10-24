@@ -198,7 +198,7 @@ unique_ptr<unsigned char[]> Image_window8::mini_screenshot() {
 			int b = 0;
 			for (i = 0; i < 3; i++) {
 				for (int j = 0; j < 3; j++) {
-					const int pix = pixels[pitch * (j + y + (get_game_height() - h) / 2) + i + x + (get_game_width() - w) / 2];
+					const int pix = pixels[pitch * res * (j + y + (get_game_height() - h) / 2) + res * (i + x + (get_game_width() - w) / 2)];
 					r += colors[3 * pix + 0];
 					g += colors[3 * pix + 1];
 					b += colors[3 * pix + 2];

@@ -693,7 +693,7 @@ public:
 	SDL_SurfaceOwner(Image_buffer* src, SDL_Surface* draw) {
 		const SDL_PixelFormatDetails* draw_format = SDL_GetPixelFormatDetails(draw->format);
 		surf                                      = SDL_CreateSurfaceFrom(
-                src->get_width(), src->get_height(),
+                src->get_width() * src->get_res(), src->get_height() * src->get_res(),
                 SDL_GetPixelFormatForMasks(
                         draw_format->bits_per_pixel, draw_format->Rmask, draw_format->Gmask, draw_format->Bmask,
                         draw_format->Amask),
@@ -1284,6 +1284,7 @@ void BG_Game::scene_desk() {
 			SDL_Surface*     draw_surface = win->get_draw_surface();
 			SDL_SurfaceOwner unzoomed_surf(unzoomed.get(), draw_surface);
 			SDL_SurfaceOwner zoomed_surf(zoomed.get(), draw_surface);
+			const int        res = unzoomed->get_res();
 
 			Shape_frame*             dotshp = shapes.get_shape(0x14, 0);
 			unique_ptr<Image_buffer> dot(win->create_buffer(dotshp->get_width(), dotshp->get_height()));
@@ -1313,7 +1314,9 @@ void BG_Game::scene_desk() {
 				if (next_ticks > SDL_GetTicks()) {
 					unzoomed->put(backup.get(), centerx + 12, centery - 22);
 					unzoomed->put(dot.get(), centerx + rand() % 3 - 1 + 12, centery + rand() % 3 - 1 - 22);
-					scaler.arb->Scale(unzoomed_surf.get(), sx, sy, sw, sh, zoomed_surf.get(), 0, 0, 320, 200, true);
+					scaler.arb->Scale(
+							unzoomed_surf.get(), sx * res, sy * res, sw * res, sh * res, zoomed_surf.get(), 0, 0, 320 * res,
+							200 * res, true);
 					win->put(zoomed.get(), 0 + (win->get_game_width() - 320) / 2, 0 + (win->get_game_height() - 200) / 2);
 					win->ShowFillGuardBand();
 					int delta = next_ticks - SDL_GetTicks();
@@ -1460,6 +1463,7 @@ void BG_Game::scene_moongate() {
 
 	SDL_SurfaceOwner unzoomed_surf(unzoomed.get(), draw_surface);
 	SDL_SurfaceOwner zoomed_surf(zoomed.get(), draw_surface);
+	const int        res = unzoomed->get_res();
 
 	const int zx = 151;
 	const int zy = 81;
@@ -1477,7 +1481,9 @@ void BG_Game::scene_moongate() {
 
 		// frame drop?
 		if (next_ticks > SDL_GetTicks()) {
-			scaler.arb->Scale(unzoomed_surf.get(), sx, sy, sw, sh, zoomed_surf.get(), 0, 0, 320, 200, true);
+			scaler.arb->Scale(
+							unzoomed_surf.get(), sx * res, sy * res, sw * res, sh * res, zoomed_surf.get(), 0, 0, 320 * res,
+							200 * res, true);
 			win->put(zoomed.get(), 0 + (win->get_game_width() - 320) / 2, 0 + (win->get_game_height() - 200) / 2);
 			win->ShowFillGuardBand();
 			int delta = next_ticks - SDL_GetTicks();

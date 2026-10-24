@@ -361,31 +361,12 @@ void Image_buffer8::draw_line8(unsigned char val, int startx, int starty, int en
 		return;
 	}
 
-	if (res != 1) {
-		// Step along the longer axis in game pixels, painting whole blocks.
-		const int steps = std::max(std::abs(endx - startx), std::abs(endy - starty));
-		for (int i = 0; i <= steps; i++) {
-			const int      x  = steps ? startx + static_cast<int>(std::lround(double(endx - startx) * i / steps)) : startx;
-			const int      y  = steps ? starty + static_cast<int>(std::lround(double(endy - starty) * i / steps)) : starty;
-			unsigned char* to = pixel_ptr(x, y);
-			if (xform == nullptr) {
-				fill_block(to, val, 1);
-			} else {
-				for (int r = 0; r < res; r++) {
-					for (int k = 0; k < res; k++) {
-						to[r * line_width + k] = (*xform)[to[r * line_width + k]];
-					}
-				}
-			}
-		}
-		return;
-	}
 	int end0   = endx;
 	int start0 = startx;
-	int inc0   = 1;
+	int inc0   = res;    // Physical steps for one game pixel.
 	int end1   = endy;
 	int start1 = starty;
-	int inc1   = line_width;
+	int inc1   = line_width * res;
 
 	// More vertical than horizontal (slope not in range [-1.0,1.0])
 	// swap the dimensions to prevent gaps
@@ -422,7 +403,25 @@ void Image_buffer8::draw_line8(unsigned char val, int startx, int starty, int en
 	// draw the line
 	unsigned char* to  = bits + start0 * inc0 + start1 * inc1;
 	unsigned char* end = bits + end0 * inc0 + end1 * inc1;
-	if (xform == nullptr) {
+	// Paints one game pixel (a res x res block).
+	auto plot = [&](unsigned char* p) {
+		for (int r = 0; r < res; r++, p += line_width) {
+			for (int k = 0; k < res; k++) {
+				p[k] = xform ? (*xform)[p[k]] : val;
+			}
+		}
+	};
+	if (res != 1) {
+		for (;;) {
+			plot(to);
+			if (to == end) {
+				break;
+			}
+			cur1 += slope;
+			to += inc0 + inc1 * static_cast<int>(cur1 >> 16);
+			cur1 &= 0xffff;
+		}
+	} else if (xform == nullptr) {
 		for (;;) {
 			*to = val;
 			// if last pixel was drawn, break out of loop before incrementing
@@ -1026,20 +1025,31 @@ void Image_buffer8::paint_rle_scaled(int xoff, int yoff, const unsigned char* in
  */
 
 void Image_buffer8::paint_hires(
-		int xoff, int yoff, const unsigned char* pixels, int w, int h, int xleft, int yabove, unsigned char transparent,
-		const unsigned char* trans) {
+		int xoff, int yoff, const unsigned char* pixels, int w, int h, int xleft, int yabove, int transparent,
+		const unsigned char* trans, const Xform_palette* xforms, int xfstart) {
 	const int x0     = xoff * res - xleft;    // Physical top-left.
 	const int y0     = yoff * res - yabove;
 	const int left   = std::max(x0, clipx * res);
 	const int right  = std::min(x0 + w, (clipx + clipw) * res);
 	const int top    = std::max(y0, clipy * res);
 	const int bottom = std::min(y0 + h, (clipy + cliph) * res);
+	if (transparent < 0 && !trans && !xforms) {    // Plain copy.
+		for (int y = top; y < bottom && left < right; y++) {
+			std::memcpy(bits + y * line_width + left, pixels + (y - y0) * w + (left - x0), right - left);
+		}
+		return;
+	}
 	for (int y = top; y < bottom; y++) {
 		const unsigned char* from = pixels + (y - y0) * w;
 		unsigned char*       to   = bits + y * line_width;
 		for (int x = left; x < right; x++) {
 			const unsigned char pix = from[x - x0];
-			if (pix != transparent) {
+			if (pix == transparent) {
+				continue;
+			}
+			if (xforms && pix >= xfstart && pix <= 0xfe) {
+				to[x] = xforms[pix - xfstart][to[x]];
+			} else {
 				to[x] = trans ? trans[pix] : pix;
 			}
 		}

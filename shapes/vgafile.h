@@ -42,6 +42,22 @@ class Image_buffer8;
 class Palette;
 
 /*
+ *  High-resolution replacement art for a frame.  It covers the same area
+ *  as the frame, with res x res pixels per original pixel.
+ */
+struct Hires_frame {
+	static constexpr int transparent = 0xff;
+
+	int                              res;              // Pixels per game pixel.
+	int                              width, height;    // In physical pixels.
+	int                              xleft, yabove;    // Origin, physical.
+	std::unique_ptr<unsigned char[]> pixels;           // width x height.
+
+	// Copy reflected across a line running NW to SE, like Shape_frame::reflect.
+	std::unique_ptr<Hires_frame> reflect() const;
+};
+
+/*
  *  A shape from "shapes.vga":
  */
 class Shape_frame {
@@ -52,7 +68,11 @@ class Shape_frame {
 	short                            yabove;    // Extent above origin.
 	short                            ybelow;    // Extent below origin.
 	bool                             rle;       // Run-length encoded.
+	std::unique_ptr<Hires_frame>     hires;     // Replacement art, or null.
 	static Image_buffer8*            scrwin;    // Screen window to render to.
+
+	// Hi-res art to use for painting into win, or null.
+	const Hires_frame* hires_for(const Image_buffer8* win) const;
 
 	// Create RLE data & store in frame.
 	void create_rle(unsigned char* pixels, int w, int h);
@@ -78,6 +98,14 @@ public:
 
 	bool is_rle() const {
 		return rle;
+	}
+
+	const Hires_frame* get_hires() const {
+		return hires.get();
+	}
+
+	void set_hires(std::unique_ptr<Hires_frame> h) {
+		hires = std::move(h);
 	}
 
 	void write(ODataSource& out) const;    // Write out.

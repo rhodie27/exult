@@ -107,6 +107,7 @@ int Image_window::windowed      = 0;
 // When HighDPI is enabled we will end up with a different native scale factor,
 // so we need to define the default
 float Image_window::nativescale = 1.0f;
+int   Image_window::requested_res = 1;
 
 SDL_PixelFormatDetails ManipBase::fmt;            // Format of dest. pixels (and src for rgb src).
 SDL_Color              ManipBase::colors[256];    // Palette for source window.
@@ -549,6 +550,12 @@ void Image_window::create_surface(unsigned int w, unsigned int h) {
 		}
 	}
 
+	// Largest detail asked for that the scale allows.
+	res = std::max(1, std::min(requested_res, scale));
+	while (scale % res) {
+		res--;
+	}
+
 	get_draw_dims(w, h, scale, fill_mode, game_width, game_height, inter_width, inter_height);
 	saved_game_height = game_height;
 	saved_game_width  = game_width;
@@ -561,8 +568,9 @@ void Image_window::create_surface(unsigned int w, unsigned int h) {
 		}
 	}
 
-	ibuf->width  = draw_surface->w;
-	ibuf->height = draw_surface->h;
+	ibuf->res    = res;
+	ibuf->width  = draw_surface->w / res;
+	ibuf->height = draw_surface->h / res;
 
 	ibuf->width -= guard_band * 2;
 	ibuf->height -= guard_band * 2;
@@ -572,9 +580,8 @@ void Image_window::create_surface(unsigned int w, unsigned int h) {
 	// Offset it set to the top left pixel if the game window
 	ibuf->offset_x = (get_full_width() - get_game_width()) / 2;
 	ibuf->offset_y = (get_full_height() - get_game_height()) / 2;
-	ibuf->bits     = static_cast<unsigned char*>(draw_surface->pixels) - get_start_x() - get_start_y() * ibuf->line_width;
-	// Scaler guardband is in effect
-	ibuf->bits += guard_band + ibuf->line_width * guard_band;
+	ibuf->bits     = static_cast<unsigned char*>(draw_surface->pixels)
+				 + (guard_band - get_start_x()) * res + (guard_band - get_start_y()) * res * ibuf->line_width;
 }
 
 /*
@@ -723,8 +730,8 @@ bool Image_window::create_scale_surfaces(int w, int h, int bpp) {
 	SDL_UnlockTexture(screen_texture);
 	locked_screen_texture = nullptr;
 
-	int draw_width  = inter_width / scale + 2 * guard_band;
-	int draw_height = inter_height / scale + 2 * guard_band;
+	int draw_width  = (inter_width / scale + 2 * guard_band) * res;
+	int draw_height = (inter_height / scale + 2 * guard_band) * res;
 	if (!(draw_surface = SDL_CreateSurface(draw_width, draw_height, SDL_GetPixelFormatForMasks(ibuf->depth, 0, 0, 0, 0)))) {
 		cerr << "Couldn't create draw surface" << endl;
 		free_surface();
@@ -965,7 +972,7 @@ void Image_window::show(int x, int y, int w, int h) {
 	inter_surface = inter_surface ? inter_surface : display_surface;
 
 	// No scaling if ibuf and draw_surface are not the same size
-	if (ibuf->width + 2 * guard_band == draw_surface->w && ibuf->height + 2 * guard_band == draw_surface->h) {
+	if ((ibuf->width + 2 * guard_band) * res == draw_surface->w && (ibuf->height + 2 * guard_band) * res == draw_surface->h) {
 		// Phase 1 blit from draw_surface to inter_surface. This only scales the input rectangle
 		const SDL_PixelFormatDetails* inter_surface_format  = SDL_GetPixelFormatDetails(inter_surface->format);
 		const size_t                  inter_bytes_per_pixel = inter_surface_format->bits_per_pixel / 8;
@@ -973,7 +980,12 @@ void Image_window::show(int x, int y, int w, int h) {
 			auto              perftimer_s = PerformanceTimer::GetScopedPerfTimer(__func__, " scaler");
 			const ScalerInfo& sel_scaler  = Scalers[scaler];
 
-			if (sel_scaler.arb) {
+			if (res > 1) {
+				// Point scale the physical pixels by what's left of scale.
+				Scalers[point].arb->Scale(
+						draw_surface, res * (x + guard_band), res * (y + guard_band), res * w, res * h, inter_surface,
+						scale * (x + guard_band), scale * (y + guard_band), scale * w, scale * h, false);
+			} else if (sel_scaler.arb) {
 				if (!sel_scaler.arb->Scale(
 							draw_surface, x + guard_band, y + guard_band, w, h, inter_surface, scale * (x + guard_band),
 							scale * (y + guard_band), scale * w, scale * h, false)) {
@@ -1010,8 +1022,8 @@ void Image_window::show(int x, int y, int w, int h) {
 
 			fullrect.x = guard_band * scale;
 			fullrect.y = guard_band * scale;
-			fullrect.w = (draw_surface->w - 2 * guard_band) * scale;
-			fullrect.h = (draw_surface->h - 2 * guard_band) * scale;
+			fullrect.w = (draw_surface->w / res - 2 * guard_band) * scale;
+			fullrect.h = (draw_surface->h / res - 2 * guard_band) * scale;
 		}
 
 		// Phase 2 blit from inter_surface to display_surface (this scales the entire surface)
@@ -1021,10 +1033,10 @@ void Image_window::show(int x, int y, int w, int h) {
 
 			// Just scale entire surfaces
 			if (inter_surface == draw_surface) {
-				x = guard_band;
-				y = guard_band;
-				w = get_full_width();
-				h = get_full_height();
+				x = guard_band * res;
+				y = guard_band * res;
+				w = get_full_width() * res;
+				h = get_full_height() * res;
 			} else {
 				x = guard_band * scale;
 				y = guard_band * scale;
@@ -1055,10 +1067,10 @@ void Image_window::show(int x, int y, int w, int h) {
 			// display_surface So the scaling can be done when rendering the texture in UpdateRect
 
 			if (inter_surface == draw_surface) {
-				x = guard_band;
-				y = guard_band;
-				w = get_full_width();
-				h = get_full_height();
+				x = guard_band * res;
+				y = guard_band * res;
+				w = get_full_width() * res;
+				h = get_full_height() * res;
 			} else {
 				x = guard_band * scale;
 				y = guard_band * scale;
@@ -1195,8 +1207,8 @@ void Image_window::BeginPaintIntoGuardBand(int* x, int* y, int* w, int* h) {
 		// draw surface includes 2 guard bands of extrapixels so to allow
 		// drawing into half a guardband we need to subtract 1.5 guardbands from
 		// the draw surface dimensions
-		ibuf->width  = draw_surface->w - 3 * guard_band / 2;
-		ibuf->height = draw_surface->h - 3 * guard_band / 2;
+		ibuf->width  = draw_surface->w / res - 3 * guard_band / 2;
+		ibuf->height = draw_surface->h / res - 3 * guard_band / 2;
 		// set the new clipping rectangle after updating the buffer dimensions
 		ibuf->set_clip(cx, cy, cw, ch);
 		guardband_paint_active = true;
@@ -1216,8 +1228,8 @@ void Image_window::EndPaintIntoGuardBand() {
 	}
 	// Restore ibuf and game screen dimensions after temporary guardband paint
 	// expansion, regardless of whether game_width/game_height were modified.
-	ibuf->width            = draw_surface->w - 2 * guard_band;
-	ibuf->height           = draw_surface->h - 2 * guard_band;
+	ibuf->width            = draw_surface->w / res - 2 * guard_band;
+	ibuf->height           = draw_surface->h / res - 2 * guard_band;
 	game_width             = saved_game_width;
 	game_height            = saved_game_height;
 	guardband_paint_active = false;
@@ -1226,7 +1238,8 @@ void Image_window::EndPaintIntoGuardBand() {
 void Image_window::FillGuardband() {
 	// In scene mode drawing goes to a full-screen scene layer buffer that has no
 	// guard band; the game window's guard band must not be filled from it.
-	if (scene_mode) {
+	// Hi-res buffers are point scaled, which never reads the guard band.
+	if (scene_mode || res > 1) {
 		return;
 	}
 	auto pixels = static_cast<uint8*>(draw_surface->pixels) + guard_band + guard_band * draw_surface->pitch;
@@ -1253,7 +1266,7 @@ void Image_window::FillGuardband() {
 
 bool Image_window::screenshot(SDL_IOStream* dst, bool paletted) {
 	if (paletted && paletted_surface) {
-		return SaveIMG_RW(draw_surface, dst, true, guard_band);
+		return SaveIMG_RW(draw_surface, dst, true, guard_band * res);
 	} else if (screen_renderer) {
 		UpdateRect(nullptr, nullptr, true);
 		SDL_Surface* surf = SDL_RenderReadPixels(screen_renderer, nullptr);

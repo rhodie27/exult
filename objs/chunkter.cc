@@ -28,6 +28,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "chunkter.h"
 
 #include "gamewin.h"
+#include "ibuf8.h"
+#include "iwin8.h"
+#include "vgafile.h"
 
 #include <cstring>
 
@@ -88,7 +91,7 @@ inline void Chunk_terrain::paint_tile(
 ) {
 	Shape_frame* shape = get_shape(tilex, tiley);
 	if (shape && !shape->is_rle()) {    // Only do flat tiles.
-		rendered_flats->copy8(shape->get_data(), c_tilesize, c_tilesize, tilex * c_tilesize, tiley * c_tilesize);
+		shape->paint(rendered_flats, (tilex + 1) * c_tilesize, (tiley + 1) * c_tilesize);
 	} else if (shape && shape->is_rle()) {
 		// Still want to draw a flat tile under rle shapes to fix black gaps in
 		// ice caves The original didn't clear it's frame buffer and gaps
@@ -127,7 +130,7 @@ inline void Chunk_terrain::paint_tile(
 
 		// Got a flat so draw it
 		if (shape) {
-			rendered_flats->copy8(shape->get_data(), c_tilesize, c_tilesize, tilex * c_tilesize, tiley * c_tilesize);
+			shape->paint(rendered_flats, (tilex + 1) * c_tilesize, (tiley + 1) * c_tilesize);
 		}
 	}
 }
@@ -245,7 +248,15 @@ static int Figure_queue_size() {
  *  Create rendered_flats buffer.
  */
 
+int Chunk_terrain::current_res() {
+	return Game_window::get_instance()->get_win()->get_ib8()->get_res();
+}
+
 Image_buffer8* Chunk_terrain::render_flats() {
+	const int res = current_res();
+	if (rendered_flats && rendered_flats->get_res() != res) {
+		free_rendered_flats();    // Window detail changed.
+	}
 	if (!rendered_flats) {
 		if (queue_size > Figure_queue_size()) {
 			// Grown too big.  Remove last.
@@ -256,7 +267,7 @@ Image_buffer8* Chunk_terrain::render_flats() {
 			last->render_queue_next = last->render_queue_prev = nullptr;
 			queue_size--;
 		}
-		rendered_flats = new Image_buffer8(c_chunksize, c_chunksize);
+		rendered_flats = new Image_buffer8(c_chunksize, c_chunksize, res);
 	}
 	// Go through array of tiles.
 	for (int tiley = 0; tiley < c_tiles_per_chunk; tiley++) {

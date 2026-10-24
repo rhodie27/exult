@@ -118,11 +118,13 @@ public:
 	void paint_rle_remapped(int xoff, int yoff, const unsigned char* inptr, const unsigned char*& trans);
 
 	// Paint high-resolution art: pixels is a (w x h) image at this buffer's
-	// res, transparent where it equals 'transparent', with its origin at
-	// (xleft, yabove) in physical pixels. xoff/yoff are game coordinates.
+	// res, transparent where it equals 'transparent' (-1 for none), with its
+	// origin at (xleft, yabove) in physical pixels. xoff/yoff are game
+	// coordinates. Pixels from xfstart to 0xfe are translucent if xforms is
+	// given, as in Shape_frame::paint_rle_translucent.
 	void paint_hires(
-			int xoff, int yoff, const unsigned char* pixels, int w, int h, int xleft, int yabove, unsigned char transparent,
-			const unsigned char* trans = nullptr);
+			int xoff, int yoff, const unsigned char* pixels, int w, int h, int xleft, int yabove, int transparent,
+			const unsigned char* trans = nullptr, const Xform_palette* xforms = nullptr, int xfstart = 0x100);
 
 	void draw_beveled_box(
 			int x, int y, int w, int h, int depth, uint8 colfill, uint8 coltop, uint8 coltr, uint8 colbottom, uint8 colbl,

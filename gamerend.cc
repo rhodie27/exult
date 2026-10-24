@@ -526,7 +526,9 @@ void Game_render::paint_chunk_flats(
 	// Paint flat tiles.
 	Image_buffer8* cflats = olist->get_rendered_flats();
 	if (cflats) {
-		gwin->win->copy8(cflats->get_bits(), c_chunksize, c_chunksize, xoff, yoff);
+		const int res = cflats->get_res();
+		gwin->win->get_ib8()->paint_hires(
+				xoff, yoff, cflats->get_bits(), c_chunksize * res, c_chunksize * res, 0, 0, -1);
 	}
 }
 
