@@ -557,8 +557,8 @@ std::shared_ptr<Font> Shape_manager::get_font(int fontnum) {
 /*
  *  Load high-resolution replacement art for a shapes.vga frame, if the
  *  patch directory has it.  Files are <PATCH>/hires/shapes/SSSS_FF.png:
- *  8-bit images in the game palette with index 255 transparent, exactly
- *  res times the frame's size.  Reflected frames reuse the art of the
+ *  8-bit images in the game palette with index 255 transparent, a multiple
+ *  of res times the frame's size.  Reflected frames reuse the art of the
  *  frame they reflect.
  */
 static void load_hires_frame(Shape_frame* frame, int shapenum, int framenum, int res) {
@@ -588,23 +588,29 @@ static void load_hires_frame(Shape_frame* frame, int shapenum, int framenum, int
 	delete[] palette;
 	std::unique_ptr<unsigned char[]> owned(pixels);
 	// Pixel values are used as is, so index 255 must be the transparent one.
-	// Size it should be: the unreflected frame's, times res.
-	const int want_w = (reflected ? frame->get_height() : frame->get_width()) * res;
-	const int want_h = (reflected ? frame->get_width() : frame->get_height()) * res;
-	if (width != want_w || height != want_h) {
-		std::cerr << "Hi-res art " << path << " is " << width << "x" << height << ", expected " << want_w << "x" << want_h
-				  << std::endl;
+	// The art must be the unreflected frame's size times a multiple of res;
+	// art made for more detail than the window has is thinned out.
+	const int base_w  = reflected ? frame->get_height() : frame->get_width();
+	const int base_h  = reflected ? frame->get_width() : frame->get_height();
+	const int art_res = width / base_w;
+	if (art_res < res || art_res % res || width != base_w * art_res || height != base_h * art_res) {
+		std::cerr << "Hi-res art " << path << " is " << width << "x" << height << ", expected a multiple of "
+				  << base_w * res << "x" << base_h * res << std::endl;
 		return;
 	}
-	auto hires    = std::make_unique<Hires_frame>();
+	const int step  = art_res / res;
+	auto      hires = std::make_unique<Hires_frame>();
 	hires->res    = res;
-	hires->width  = width;
-	hires->height = height;
+	hires->width  = base_w * res;
+	hires->height = base_h * res;
 	hires->xleft  = (reflected ? frame->get_yabove() : frame->get_xleft()) * res;
 	hires->yabove = (reflected ? frame->get_xleft() : frame->get_yabove()) * res;
-	hires->pixels = std::make_unique<unsigned char[]>(width * height);
-	for (int y = 0; y < height; y++) {
-		std::memcpy(&hires->pixels[y * width], pixels + y * rowbytes, width);
+	hires->pixels = std::make_unique<unsigned char[]>(hires->width * hires->height);
+	for (int y = 0; y < hires->height; y++) {
+		const unsigned char* from = pixels + y * step * rowbytes;
+		for (int x = 0; x < hires->width; x++) {
+			hires->pixels[y * hires->width + x] = from[x * step];
+		}
 	}
 	frame->set_hires(reflected ? hires->reflect() : std::move(hires));
 #else
